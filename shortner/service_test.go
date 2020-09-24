@@ -1,11 +1,24 @@
 package shortner
 
 import (
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"strings"
 	"testing"
 	"time"
 )
+
+func init() {
+	data, err := ioutil.ReadFile("config.json")
+	if err != nil {
+		fmt.Println(err)
+	}
+	err = json.Unmarshal(data, &config)
+	if err != nil {
+		fmt.Println("error converting json ", err)
+	}
+}
 
 func TestFind(t *testing.T) {
 	shortlink := GetRandom()

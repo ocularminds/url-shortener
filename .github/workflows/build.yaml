@@ -14,8 +14,6 @@ jobs:
         uses: actions/setup-go@v1
         with:
           go-version: 1.15
-      - name: Install Database
-        run: 
       - name: Check out code
         uses: actions/checkout@v1
 
@@ -38,7 +36,7 @@ jobs:
         uses: actions/checkout@v1
 
       - name: Run Unit tests and Coverage
-        run: cd shortner; go test -race -coverprofile=coverage.txt -covermode=atomic
+        run: make test
 
       - name: Upload Coverage report to CodeCov
         run: bash <(curl -s https://codecov.io/bash)
@@ -63,9 +61,16 @@ jobs:
     name: make
     runs-on: ubuntu-latest
     steps:
-      - setup:
+      - name: Set up Go
+        uses: actions/setup-go@v1
+        with:
+          go-version: 1.15
+
+      - name: Check out code
+        uses: actions/checkout@v1
+        
+      - name: Setup Database
          run: make setup
-      - server:
-         run: make server
-      - test:
+         
+      - test: Run Test with make
          run: make test
