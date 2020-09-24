@@ -15,19 +15,7 @@ jobs:
         with:
           go-version: 1.15
       - name: Install Database
-        run: apt-get update -y && sudo apt-get upgrade -y && sudo apt-get install build-essential mysql-server libmysqlclient-dev npm -y  
-      - name: Flush Priviledge
-        run: mysql -e "SET PASSWORD FOR root@localhost = PASSWORD('pass');FLUSH PRIVILEGES;"  
-      - name: Remove Dummy User
-        run: mysql -e "DELETE FROM mysql.user WHERE User='';"  
-      - name: Remove MySQL User
-        run: mysql -e "DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');"  
-      - name: Remove Test Database
-        run: mysql -e "DROP DATABASE test;DELETE FROM mysql.db WHERE Db='test' OR Db='test_%';"  
-      - name: Create Ubuntu User
-        run: mysql -u root -ppass -e "CREATE USER 'ubuntu'@'localhost' IDENTIFIED BY 'pass';GRANT ALL PRIVILEGES ON *.* TO 'ubuntu'@'localhost';FLUSH PRIVILEGES;"
-      - name: Create ShortLink User
-        run: mysql -u root -ppass -e "create database blogs; use blogs; create table ShortLink(Shortened varchar(8) PRIMARY KEY,Original varchar(255), Expiry int, Created  datetime, Hits int);"
+        run: 
       - name: Check out code
         uses: actions/checkout@v1
 
@@ -70,4 +58,14 @@ jobs:
 
       - name: Build
         run: 
-          cd hello; go build
+          cd shortner; go build
+  make:
+    name: make
+    runs-on: ubuntu-latest
+    steps:
+      - setup:
+         run: make setup
+      - server:
+         run: make server
+      - test:
+         run: make test
