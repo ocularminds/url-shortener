@@ -16,9 +16,7 @@ setup:
   sudo mysql -e "DROP DATABASE test;DELETE FROM mysql.db WHERE Db='test' OR Db='test_%';"  
   sudo mysql -u root -ppass -e "CREATE USER 'ubuntu'@'localhost' IDENTIFIED BY 'pass';GRANT ALL PRIVILEGES ON *.* TO 'ubuntu'@'localhost';FLUSH PRIVILEGES;"
   sudo mysql -u root -ppass -e "create database blogs; use blogs; create table ShortLink(Shortened varchar(8) PRIMARY KEY,Original varchar(255), Expiry int, Created  datetime, Hits int);"
-  wget -c https://golang.org/dl/go1.15.2.linux-386.tar.gz
-  shasum -a 256 go1.15.2.linux-386.tar.gz
-  sudo tar -C /usr/local -xvzf go1.15.2.linux-386.tar.gz
+  sudo apt install golang-go -y
   mkdir -p ~/go_projects/{bin,src,pkg}
   cd ~/go_projects
   ls
