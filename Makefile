@@ -34,8 +34,7 @@ go-generate:
 	@echo	"  >  Generating dependency files..."
 	go generate $(generate)
 
-install-db: 
-	db-check db-get db-update db-pass db-user db-drop db-create db-install
+install-db:	db-check db-get db-update db-pass db-user db-drop db-create db-install
 db-check: 
 	apt-get update
 db-get: 
