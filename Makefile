@@ -34,8 +34,7 @@ go-generate:
 	@echo	"  >  Generating dependency files..."
 	go generate $(generate)
 
-install-db: 
-	db-check db-get db-update db-pass db-user db-drop db-create db-install
+install-db:	db-check db-get db-update db-pass db-user db-drop db-create db-install
 db-check: 
 	apt-get update
 db-get: 
@@ -50,5 +49,5 @@ db-drop:
 	mysql -e "DROP DATABASE test;DELETE FROM mysql.db WHERE Db='test' OR Db='test_%';"  
 db-create: 
 	mysql -u root -ppass -e "create database blogs; use blogs; create table ShortLink(Shortened varchar(8) PRIMARY KEY,Original varchar(255), Expiry int, Created  datetime, Hits int);"
-go-install:
-	apt install golang-go -y
+#go-install:
+	#apt install golang-go -y
