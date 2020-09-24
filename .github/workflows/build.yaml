@@ -71,6 +71,6 @@ jobs:
         
       - name: Setup Database
         run: make setup
-         
-      - test: Run Test with make
+
+      - name: Run Test with make
         run: make test
