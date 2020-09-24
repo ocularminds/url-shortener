@@ -1,0 +1,10 @@
+{
+  "port": 8080,
+  "database": {
+    "name": "blogs",
+    "host": "localhost",
+    "port": 3306,
+    "username": "root",
+    "password": "pass"
+  }
+}
