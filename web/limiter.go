@@ -27,14 +27,28 @@ type TokenBucketLimiter struct {
 	now        func() time.Time
 }
 
-func NewTokenBucketLimiter(settings config.RateLimit) *TokenBucketLimiter {
-	return &TokenBucketLimiter{
+type LimiterOption func(*TokenBucketLimiter)
+
+func WithLimiterClock(clock func() time.Time) LimiterOption {
+	return func(limiter *TokenBucketLimiter) {
+		if clock != nil {
+			limiter.now = clock
+		}
+	}
+}
+
+func NewTokenBucketLimiter(settings config.RateLimit, options ...LimiterOption) *TokenBucketLimiter {
+	limiter := &TokenBucketLimiter{
 		clients:    make(map[string]clientBucket),
 		rate:       float64(settings.RequestsPerMinute) / 60,
 		burst:      float64(settings.Burst),
 		maxClients: settings.MaxClients,
 		now:        time.Now,
 	}
+	for _, option := range options {
+		option(limiter)
+	}
+	return limiter
 }
 
 func (limiter *TokenBucketLimiter) Allow(key string) (bool, time.Duration) {
