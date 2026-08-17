@@ -1,23 +1,42 @@
 package main
 
 import (
-    "encoding/json"
-    "fmt"
-    "io/ioutil"
+	"context"
+	"log"
+	"os"
+	"os/signal"
+	"syscall"
+
+	"github.com/ocularminds/url-shortener/shortner"
 )
-import "ocularminds.com/shortner"
 
 func main() {
+	if err := run(); err != nil {
+		log.Printf("server stopped: %v", err)
+		os.Exit(1)
+	}
+}
 
-   data, err := ioutil.ReadFile("config.json")
-    if err != nil {
-        fmt.Println(err)
-    }   
-    var config shortner.Config
-    err = json.Unmarshal(data, &config)
-    if err != nil {
-        fmt.Println("error converting json ",err)
-    }   
-    fmt.Println("Server Port:",config.Port,"database:", config.Db.Name) 
-    shortner.BuildRoutes(config)
+func run() error {
+	configPath := os.Getenv("URL_SHORTENER_CONFIG")
+	if configPath == "" {
+		configPath = "config.json"
+	}
+
+	cfg, err := shortner.LoadConfig(configPath)
+	if err != nil {
+		return err
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	app, err := shortner.NewApplication(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	defer app.Close()
+
+	log.Printf("listening on %s", app.Address())
+	return app.Run(ctx)
 }

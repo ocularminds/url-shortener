@@ -1,7 +1,7 @@
-module ocularminds.com/main
+module github.com/ocularminds/url-shortener
 
-go 1.15
+go 1.26.6
 
-replace ocularminds.com/shortner => /shortner
+require github.com/go-sql-driver/mysql v1.9.3
 
-require ocularminds.com/shortner v0.0.0-00010101000000-000000000000
+require filippo.io/edwards25519 v1.1.0 // indirect

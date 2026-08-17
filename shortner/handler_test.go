@@ -3,159 +3,137 @@ package shortner
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
-	"math/rand"
+	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
+	"strings"
 	"testing"
-
-	"github.com/gorilla/mux"
 )
 
-func TestHandlePostLink(t *testing.T) {
-	form := newShortLinkForm()
-	recorder := createPost(form, t)
-	if status := recorder.Code; status != http.StatusOK {
-		t.Errorf("handler returned wrong status code: got %v want %v",
-			status, http.StatusOK)
-	}
-	s := ShortLink{}
-	err := json.NewDecoder(recorder.Body).Decode(&s)
-	if err != nil {
-		//t.Fatal(err)
-		fmt.Println("Test failed. ", err)
-	}
-}
-
-func TestHandlePostLinkWithAlreadyShortenedLink(t *testing.T) {
-	form := newShortLinkForm()
-	recorder := createPost(form, t)
-	if status := recorder.Code; status != http.StatusOK {
-		t.Errorf("handler returned wrong status code: got %v want %v",
-			status, http.StatusOK)
-	}
-	fault := Fault{}
-	err := json.NewDecoder(recorder.Body).Decode(&fault)
+func newTestHandler(t *testing.T) (http.Handler, *memoryRepository) {
+	t.Helper()
+	repository := newMemoryRepository()
+	service := newTestService(t, repository, "AbCd1234", "EfGh5678")
+	handler, err := NewHandler(service, "https://sho.rt", "../views", log.New(io.Discard, "", 0))
 	if err != nil {
 		t.Fatal(err)
 	}
-	shortlink := fault.Link
-	recorder = createPost(form, t)
-	if status := recorder.Code; status != http.StatusOK {
-		t.Errorf("handler returned wrong status code: got %v want %v",
-			status, http.StatusOK)
+	return handler.Routes(nil), repository
+}
+
+func performJSONRequest(handler http.Handler, body string) *httptest.ResponseRecorder {
+	request := httptest.NewRequest(http.MethodPost, "http://attacker.example/", strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	return response
+}
+
+func TestHandlerCreatesLinkWithoutTrustingHostHeader(t *testing.T) {
+	handler, _ := newTestHandler(t)
+	response := performJSONRequest(handler, `{"url":"https://example.com/long"}`)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d; body=%s", response.Code, http.StatusCreated, response.Body.String())
 	}
-	fault = Fault{}
-	err = json.NewDecoder(recorder.Body).Decode(&fault)
+	var payload linkResponse
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.ShortLink != "https://sho.rt/AbCd1234" {
+		t.Fatalf("shortLink = %q, want configured origin", payload.ShortLink)
+	}
+
+	response = performJSONRequest(handler, `{"url":"https://example.com/long"}`)
+	if response.Code != http.StatusOK {
+		t.Fatalf("repeat status = %d, want %d", response.Code, http.StatusOK)
+	}
+}
+
+func TestHandlerRejectsMalformedRequests(t *testing.T) {
+	handler, _ := newTestHandler(t)
+	tests := []struct {
+		name        string
+		contentType string
+		body        string
+		status      int
+	}{
+		{name: "wrong content type", contentType: "text/plain", body: `{}`, status: http.StatusUnsupportedMediaType},
+		{name: "unknown field", contentType: "application/json", body: `{"url":"https://example.com","admin":true}`, status: http.StatusBadRequest},
+		{name: "multiple values", contentType: "application/json", body: `{"url":"https://example.com"}{}`, status: http.StatusBadRequest},
+		{name: "unsafe scheme", contentType: "application/json", body: `{"url":"javascript://example.com"}`, status: http.StatusBadRequest},
+		{name: "oversized", contentType: "application/json", body: `{"url":"https://example.com/` + strings.Repeat("a", maxRequestBodyBytes) + `"}`, status: http.StatusBadRequest},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(test.body))
+			request.Header.Set("Content-Type", test.contentType)
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != test.status {
+				t.Fatalf("status = %d, want %d; body=%s", response.Code, test.status, response.Body.String())
+			}
+		})
+	}
+}
+
+func TestHandlerRedirectsAndReturnsNotFound(t *testing.T) {
+	handler, _ := newTestHandler(t)
+	created := performJSONRequest(handler, `{"url":"https://example.com/target"}`)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create status = %d", created.Code)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/AbCd1234", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusFound || response.Header().Get("Location") != "https://example.com/target" {
+		t.Fatalf("redirect = (%d, %q), want target", response.Code, response.Header().Get("Location"))
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/NotFound", nil)
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("unknown status = %d, want %d", response.Code, http.StatusNotFound)
+	}
+}
+
+func TestHandlerAddsSecurityHeaders(t *testing.T) {
+	handler, _ := newTestHandler(t)
+	request := httptest.NewRequest(http.MethodGet, "/missing1", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	for _, header := range []string{
+		"Content-Security-Policy",
+		"Permissions-Policy",
+		"Referrer-Policy",
+		"X-Content-Type-Options",
+		"X-Frame-Options",
+	} {
+		if response.Header().Get(header) == "" {
+			t.Errorf("security header %s is missing", header)
+		}
+	}
+}
+
+func TestCreateRouteIsRateLimited(t *testing.T) {
+	repository := newMemoryRepository()
+	service := newTestService(t, repository, "AbCd1234", "EfGh5678")
+	handler, err := NewHandler(service, "https://sho.rt", "../views", log.New(io.Discard, "", 0))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if shortlink != fault.Link {
-		t.Errorf("wrong shortlink for existing url: got %v want %v",
-			fault.Link, shortlink)
-	}
-}
-func TestHandlePostLinkWithEmptyURL(t *testing.T) {
-	form := make(map[string]string)
-	form["url"] = ""
-	recorder := createPost(form, t)
-	if status := recorder.Code; status != http.StatusBadRequest {
-		t.Errorf("handler returned wrong status code: got %v want %v",
-			status, http.StatusBadRequest)
-	}
-}
+	limiter := NewTokenBucketLimiter(RateLimitConfig{RequestsPerMinute: 1, Burst: 1, MaxClients: 10})
+	router := handler.Routes(limiter)
 
-func TestHandlePostLinkWithInvalidURL(t *testing.T) {
-	form := make(map[string]string)
-	form["url"] = "htt.//www.zyx//"
-	recorder := createPost(form, t)
-	if status := recorder.Code; status != http.StatusBadRequest {
-		t.Errorf("handler returned wrong status code: got %v want %v",
-			status, http.StatusBadRequest)
+	first := performJSONRequest(router, `{"url":"https://example.com/one"}`)
+	second := performJSONRequest(router, `{"url":"https://example.com/two"}`)
+	if first.Code != http.StatusCreated || second.Code != http.StatusTooManyRequests {
+		t.Fatalf("statuses = (%d, %d), want (%d, %d)", first.Code, second.Code, http.StatusCreated, http.StatusTooManyRequests)
 	}
-}
-
-func TestHandleHomeLink(t *testing.T) {
-
-}
-
-func TestHandleGetLink(t *testing.T) {
-	form := newShortLinkForm()
-	recorder := createPost(form, t)
-	fault := Fault{}
-	fmt.Println("response -> ", recorder.Body)
-	err := json.NewDecoder(recorder.Body).Decode(&fault)
-
-	fmt.Println("request -> ", "/"+fault.Link)
-	req, err2 := http.NewRequest("GET", "/"+fault.Link, nil)
-	if err != nil {
-		t.Fatal(err2)
+	if second.Header().Get("Retry-After") == "" {
+		t.Fatal("rate-limited response is missing Retry-After")
 	}
-	recorder = httptest.NewRecorder()
-	r := mux.NewRouter().StrictSlash(true)
-	r.HandleFunc("/{slug}", HandleGetLink).Methods("GET")
-	http.Handle("/", r)
-	r.ServeHTTP(recorder, req)
-
-	if status := recorder.Code; status != http.StatusSeeOther {
-		t.Errorf("handler returned wrong status code: got %v want %v",
-			status, http.StatusSeeOther)
-	}
-}
-func TestHandleGetLinkWithUnknownShortLink(t *testing.T) {
-	fmt.Println("request -> ", "/ZZZZ00000")
-	req, err2 := http.NewRequest("GET", "/ZZZZ00000", nil)
-	if err2 != nil {
-		t.Fatal(err2)
-	}
-	recorder := httptest.NewRecorder()
-	r := mux.NewRouter().StrictSlash(true)
-	r.HandleFunc("/{slug}", HandleGetLink).Methods("GET")
-	r.ServeHTTP(recorder, req)
-
-	if status := recorder.Code; status != http.StatusNotFound {
-		t.Errorf("handler returned wrong status code: got %v want %v",
-			status, http.StatusNotFound)
-	}
-}
-func TestHandleGetLinkWithEmptySlug(t *testing.T) {
-	fmt.Println("request -> ", "/")
-	req, err2 := http.NewRequest("GET", "/", nil)
-	if err2 != nil {
-		t.Fatal(err2)
-	}
-	recorder := httptest.NewRecorder()
-	r := mux.NewRouter().StrictSlash(true)
-	r.HandleFunc("/{slug}", HandleGetLink).Methods("GET")
-	r.ServeHTTP(recorder, req)
-
-	if status := recorder.Code; status != http.StatusNotFound {
-		t.Errorf("handler returned wrong status code: got %v want %v",
-			status, http.StatusNotFound)
-	}
-}
-
-func newShortLinkForm() map[string]string {
-	urls := []string{"https://www.youtube.com/show?", "http://www.stord.com/api/virtual/wharehouses"}
-	longURL := urls[rand.Intn(2)] + GetRandom() + GetRandom()
-	form := make(map[string]string)
-	form["url"] = longURL
-	return form
-}
-
-func createPost(form map[string]string, t *testing.T) *httptest.ResponseRecorder {
-	body, _ := json.Marshal(form)
-	fmt.Println("request -> ", string(body))
-	req, err := http.NewRequest("POST", "/", bytes.NewReader(body))
-	req.Header.Add("Content-Type", "application/json")
-	req.Header.Add("Content-Length", strconv.Itoa(len(body)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	recorder := httptest.NewRecorder()
-	r := mux.NewRouter()
-	r.HandleFunc("/", HandlePostLink).Methods("POST")
-	r.ServeHTTP(recorder, req)
-	return recorder
 }
