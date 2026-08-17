@@ -1,2 +1,4 @@
-main.exe
-.main
+.DS_Store
+*.exe
+coverage.out
+url-shortener

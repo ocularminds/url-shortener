@@ -1,7 +1,10 @@
-create table ShortLink(
-  Shortened varchar(8) PRIMARY KEY,
-  Original varchar(255),
-  Expiry int,
-  Created  datetime,
-  Hits int
-);
+CREATE TABLE IF NOT EXISTS ShortLink (
+  Shortened CHAR(8) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  Original VARCHAR(2048) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  Expiry SMALLINT UNSIGNED NOT NULL DEFAULT 30,
+  Created DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  Hits BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  PRIMARY KEY (Shortened),
+  INDEX idx_shortlink_original (Original(191)),
+  CONSTRAINT chk_shortlink_expiry CHECK (Expiry BETWEEN 1 AND 3650)
+) ENGINE = InnoDB;

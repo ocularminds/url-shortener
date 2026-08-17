@@ -198,8 +198,14 @@ func (cfg Config) Validate() error {
 		return errors.New("port must be between 1 and 65535")
 	}
 	base, err := url.Parse(cfg.PublicBaseURL)
-	if err != nil || (base.Scheme != "http" && base.Scheme != "https") || base.Host == "" {
+	if err != nil || (base.Scheme != "http" && base.Scheme != "https") || base.Host == "" || base.Hostname() == "" {
 		return errors.New("public_base_url must be an absolute http or https URL")
+	}
+	if port := base.Port(); port != "" {
+		portNumber, err := strconv.Atoi(port)
+		if err != nil || portNumber < 1 || portNumber > 65535 {
+			return errors.New("public_base_url contains an invalid port")
+		}
 	}
 	if base.User != nil || base.RawQuery != "" || base.Fragment != "" || (base.Path != "" && base.Path != "/") {
 		return errors.New("public_base_url must not contain credentials, a path, query, or fragment")
@@ -209,6 +215,12 @@ func (cfg Config) Validate() error {
 	}
 	if cfg.Database.Host == "" || cfg.Database.Port < 1 || cfg.Database.Port > 65535 {
 		return errors.New("database host and a valid port are required")
+	}
+	if cfg.Database.TLSMode != "" && cfg.Database.TLSMode != "true" {
+		return errors.New("database tls_mode must be true or omitted for a loopback connection")
+	}
+	if !isLoopbackHost(cfg.Database.Host) && cfg.Database.TLSMode != "true" {
+		return errors.New("database TLS is required for non-loopback connections")
 	}
 	if cfg.Database.MaxOpenConnections < 1 || cfg.Database.MaxIdleConnections < 0 || cfg.Database.MaxIdleConnections > cfg.Database.MaxOpenConnections {
 		return errors.New("invalid database connection pool limits")
@@ -230,4 +242,12 @@ func (cfg Config) Validate() error {
 
 func (cfg DatabaseConfig) address() string {
 	return net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
+}
+
+func isLoopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	address := net.ParseIP(host)
+	return address != nil && address.IsLoopback()
 }
