@@ -1,6 +1,22 @@
-# URL Shortener
+<p align="center">
+  <img src=".github/assets/url-shortener.svg" width="112" height="112" alt="URL Shortener logo">
+</p>
 
-A small Go and MySQL service that creates cryptographically random, eight-character short links and redirects them to validated HTTP or HTTPS destinations. The browser client is dependency-free and embedded in the server binary.
+<h1 align="center">URL Shortener</h1>
+
+<p align="center">
+  A security-conscious Go and MySQL service for fast, cryptographically random short links.
+</p>
+
+<p align="center">
+  <a href="https://github.com/ocularminds/url-shortener/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/ocularminds/url-shortener/actions/workflows/ci.yml/badge.svg?branch=master"></a>
+  <a href="#verification"><img alt="Coverage: at least 98%" src="https://img.shields.io/badge/coverage-%E2%89%A598%25-2ea44f?style=flat-square&logo=go&logoColor=white"></a>
+  <a href="https://github.com/ocularminds/url-shortener/blob/master/go.mod"><img alt="Go version" src="https://img.shields.io/github/go-mod/go-version/ocularminds/url-shortener?style=flat-square&logo=go&logoColor=white"></a>
+  <a href="LICENSE"><img alt="License: Apache 2.0" src="https://img.shields.io/badge/license-Apache--2.0-D22128?style=flat-square&logo=apache&logoColor=white"></a>
+  <a href="https://pkg.go.dev/github.com/ocularminds/url-shortener"><img alt="Go Reference" src="https://pkg.go.dev/badge/github.com/ocularminds/url-shortener.svg"></a>
+</p>
+
+The service creates eight-character short links and redirects them only to validated HTTP or HTTPS destinations. Its dependency-free browser client is embedded in the server binary.
 
 ## Project layout
 
@@ -100,3 +116,7 @@ make benchmark
 ```
 
 All source and configuration files remain below 500 lines.
+
+## License
+
+Licensed under the [Apache License 2.0](LICENSE).
