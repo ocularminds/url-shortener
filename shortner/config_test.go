@@ -42,10 +42,27 @@ func TestConfigRejectsHostilePublicURL(t *testing.T) {
 		"https://user:pass@example.com",
 		"https://example.com/hidden/path",
 		"https://example.com/?override=true",
+		"https://example.com:999999",
 	} {
 		cfg.PublicBaseURL = candidate
 		if err := cfg.Validate(); err == nil {
 			t.Errorf("Validate() accepted public URL %q", candidate)
 		}
+	}
+}
+
+func TestConfigRequiresTLSForRemoteDatabase(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.PublicBaseURL = "https://sho.rt"
+	cfg.Database.Name = "shortener"
+	cfg.Database.Username = "app"
+	cfg.Database.Host = "database.example.com"
+
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() accepted a remote database without TLS")
+	}
+	cfg.Database.TLSMode = "true"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() rejected remote database TLS: %v", err)
 	}
 }

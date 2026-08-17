@@ -107,6 +107,9 @@ func TestHandlerAddsSecurityHeaders(t *testing.T) {
 
 	for _, header := range []string{
 		"Content-Security-Policy",
+		"Cross-Origin-Opener-Policy",
+		"Cross-Origin-Resource-Policy",
+		"Origin-Agent-Cluster",
 		"Permissions-Policy",
 		"Referrer-Policy",
 		"X-Content-Type-Options",
@@ -115,6 +118,28 @@ func TestHandlerAddsSecurityHeaders(t *testing.T) {
 		if response.Header().Get(header) == "" {
 			t.Errorf("security header %s is missing", header)
 		}
+	}
+	if response.Header().Get("Strict-Transport-Security") == "" {
+		t.Error("HSTS is missing for a configured HTTPS public origin")
+	}
+}
+
+func TestHandlerServesOnlyExplicitStaticAssets(t *testing.T) {
+	handler, _ := newTestHandler(t)
+	for _, path := range []string{"/app.js", "/style.css"} {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Errorf("GET %s status = %d, want 200", path, response.Code)
+		}
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/files/assets/unused.js", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("legacy asset path status = %d, want 404", response.Code)
 	}
 }
 

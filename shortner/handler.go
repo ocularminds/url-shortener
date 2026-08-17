@@ -52,31 +52,33 @@ func NewHandler(service LinkService, publicBaseURL string, viewsDir string, logg
 
 func (handler *Handler) Routes(limiter *TokenBucketLimiter) http.Handler {
 	router := http.NewServeMux()
-	router.HandleFunc("GET /", handler.home)
-	router.HandleFunc("POST /", handler.create)
+	router.HandleFunc("GET /{$}", handler.home)
+	router.HandleFunc("POST /{$}", handler.create)
 	router.HandleFunc("GET /app.js", handler.javascript)
 	router.HandleFunc("GET /style.css", handler.stylesheet)
-	router.Handle("GET /files/", http.StripPrefix("/files/", http.FileServer(http.Dir(handler.viewsDir))))
 	router.HandleFunc("GET /{slug}", handler.redirect)
 
 	var result http.Handler = router
 	if limiter != nil {
 		result = limitCreateRequests(result, limiter)
 	}
-	return securityHeaders(result)
+	return handler.securityHeaders(result)
 }
 
 func (handler *Handler) home(response http.ResponseWriter, request *http.Request) {
+	response.Header().Set("Cache-Control", "no-cache")
 	http.ServeFile(response, request, filepath.Join(handler.viewsDir, "index.html"))
 }
 
 func (handler *Handler) javascript(response http.ResponseWriter, request *http.Request) {
 	response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+	response.Header().Set("Cache-Control", "public, max-age=3600")
 	http.ServeFile(response, request, filepath.Join(handler.viewsDir, "app.js"))
 }
 
 func (handler *Handler) stylesheet(response http.ResponseWriter, request *http.Request) {
 	response.Header().Set("Content-Type", "text/css; charset=utf-8")
+	response.Header().Set("Cache-Control", "public, max-age=3600")
 	http.ServeFile(response, request, filepath.Join(handler.viewsDir, "style.css"))
 }
 
@@ -153,14 +155,17 @@ func (handler *Handler) writeJSON(response http.ResponseWriter, status int, valu
 	}
 }
 
-func securityHeaders(next http.Handler) http.Handler {
+func (handler *Handler) securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		response.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'")
+		response.Header().Set("Content-Security-Policy", "default-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'")
+		response.Header().Set("Cross-Origin-Opener-Policy", "same-origin")
+		response.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
+		response.Header().Set("Origin-Agent-Cluster", "?1")
 		response.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 		response.Header().Set("Referrer-Policy", "no-referrer")
 		response.Header().Set("X-Content-Type-Options", "nosniff")
 		response.Header().Set("X-Frame-Options", "DENY")
-		if request.TLS != nil {
+		if request.TLS != nil || handler.publicBaseURL.Scheme == "https" {
 			response.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 		}
 		next.ServeHTTP(response, request)

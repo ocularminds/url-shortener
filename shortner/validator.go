@@ -2,7 +2,6 @@ package shortner
 
 import (
 	"errors"
-	"fmt"
 	"net/url"
 	"strconv"
 	"strings"
@@ -49,9 +48,6 @@ func (validator URLValidator) Validate(source string) error {
 		if err != nil || portNumber < 1 || portNumber > 65535 {
 			return ErrInvalidURL
 		}
-	}
-	if _, err := url.Parse(fmt.Sprintf("%s://%s", parsed.Scheme, parsed.Host)); err != nil {
-		return ErrInvalidURL
 	}
 	return nil
 }
