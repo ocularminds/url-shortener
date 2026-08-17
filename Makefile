@@ -2,6 +2,7 @@
 
 COVERAGE_PACKAGES := ./config,./core/...,./web
 COVERAGE_MINIMUM := 98.0
+GOVULNCHECK_VERSION := v1.7.0
 
 setup:
 	go mod download
@@ -24,6 +25,6 @@ build:
 	go build ./...
 
 vuln:
-	go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+	go run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) ./...
 
 check: test vet build vuln
