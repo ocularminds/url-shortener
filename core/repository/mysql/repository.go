@@ -1,4 +1,5 @@
-package shortner
+// Package mysql provides the MySQL implementation of the repository contract.
+package mysql
 
 import (
 	"context"
@@ -7,31 +8,22 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/go-sql-driver/mysql"
+	mysqldriver "github.com/go-sql-driver/mysql"
+	"github.com/ocularminds/url-shortener/config"
+	"github.com/ocularminds/url-shortener/core/models"
+	"github.com/ocularminds/url-shortener/core/repository"
 )
 
-var (
-	ErrNotFound = errors.New("short link not found")
-	ErrConflict = errors.New("short link already exists")
-)
-
-type LinkRepository interface {
-	FindBySlug(context.Context, string) (ShortLink, error)
-	FindByOriginal(context.Context, string) (ShortLink, error)
-	Create(context.Context, ShortLink) error
-	IncrementHits(context.Context, string) error
-}
-
-type MySQLRepository struct {
+type Repository struct {
 	db *sql.DB
 }
 
-func NewMySQLRepository(ctx context.Context, cfg DatabaseConfig) (*MySQLRepository, error) {
-	driverConfig := mysql.NewConfig()
+func New(ctx context.Context, cfg config.DatabaseConfig) (*Repository, error) {
+	driverConfig := mysqldriver.NewConfig()
 	driverConfig.User = cfg.Username
 	driverConfig.Passwd = cfg.Password
 	driverConfig.Net = "tcp"
-	driverConfig.Addr = cfg.address()
+	driverConfig.Addr = cfg.Address()
 	driverConfig.DBName = cfg.Name
 	driverConfig.ParseTime = true
 	driverConfig.Loc = time.UTC
@@ -40,7 +32,7 @@ func NewMySQLRepository(ctx context.Context, cfg DatabaseConfig) (*MySQLReposito
 	driverConfig.WriteTimeout = cfg.WriteTimeout
 	driverConfig.TLSConfig = cfg.TLSMode
 
-	connector, err := mysql.NewConnector(driverConfig)
+	connector, err := mysqldriver.NewConnector(driverConfig)
 	if err != nil {
 		return nil, fmt.Errorf("configure database: %w", err)
 	}
@@ -54,28 +46,28 @@ func NewMySQLRepository(ctx context.Context, cfg DatabaseConfig) (*MySQLReposito
 		db.Close()
 		return nil, fmt.Errorf("connect to database: %w", err)
 	}
-	return &MySQLRepository{db: db}, nil
+	return &Repository{db: db}, nil
 }
 
-func (repository *MySQLRepository) Close() error {
-	return repository.db.Close()
+func (store *Repository) Close() error {
+	return store.db.Close()
 }
 
-func (repository *MySQLRepository) FindBySlug(ctx context.Context, slug string) (ShortLink, error) {
+func (store *Repository) FindBySlug(ctx context.Context, slug string) (models.ShortLink, error) {
 	const query = `SELECT Shortened, Original, Expiry, Created, Hits
 		FROM ShortLink WHERE Shortened = ? LIMIT 1`
-	return repository.find(ctx, query, slug)
+	return store.find(ctx, query, slug)
 }
 
-func (repository *MySQLRepository) FindByOriginal(ctx context.Context, original string) (ShortLink, error) {
+func (store *Repository) FindByOriginal(ctx context.Context, original string) (models.ShortLink, error) {
 	const query = `SELECT Shortened, Original, Expiry, Created, Hits
 		FROM ShortLink WHERE Original = ? ORDER BY Created DESC LIMIT 1`
-	return repository.find(ctx, query, original)
+	return store.find(ctx, query, original)
 }
 
-func (repository *MySQLRepository) find(ctx context.Context, query string, value string) (ShortLink, error) {
-	var link ShortLink
-	err := repository.db.QueryRowContext(ctx, query, value).Scan(
+func (store *Repository) find(ctx context.Context, query string, value string) (models.ShortLink, error) {
+	var link models.ShortLink
+	err := store.db.QueryRowContext(ctx, query, value).Scan(
 		&link.Shortened,
 		&link.Original,
 		&link.Expiry,
@@ -83,18 +75,18 @@ func (repository *MySQLRepository) find(ctx context.Context, query string, value
 		&link.Hits,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
-		return ShortLink{}, ErrNotFound
+		return models.ShortLink{}, repository.ErrNotFound
 	}
 	if err != nil {
-		return ShortLink{}, fmt.Errorf("find short link: %w", err)
+		return models.ShortLink{}, fmt.Errorf("find short link: %w", err)
 	}
 	return link, nil
 }
 
-func (repository *MySQLRepository) Create(ctx context.Context, link ShortLink) error {
+func (store *Repository) Create(ctx context.Context, link models.ShortLink) error {
 	const statement = `INSERT INTO ShortLink
 		(Shortened, Original, Expiry, Created, Hits) VALUES (?, ?, ?, ?, ?)`
-	_, err := repository.db.ExecContext(
+	_, err := store.db.ExecContext(
 		ctx,
 		statement,
 		link.Shortened,
@@ -103,9 +95,9 @@ func (repository *MySQLRepository) Create(ctx context.Context, link ShortLink) e
 		link.Created,
 		link.Hits,
 	)
-	var mysqlError *mysql.MySQLError
+	var mysqlError *mysqldriver.MySQLError
 	if errors.As(err, &mysqlError) && mysqlError.Number == 1062 {
-		return ErrConflict
+		return repository.ErrConflict
 	}
 	if err != nil {
 		return fmt.Errorf("create short link: %w", err)
@@ -113,9 +105,9 @@ func (repository *MySQLRepository) Create(ctx context.Context, link ShortLink) e
 	return nil
 }
 
-func (repository *MySQLRepository) IncrementHits(ctx context.Context, slug string) error {
+func (store *Repository) IncrementHits(ctx context.Context, slug string) error {
 	const statement = `UPDATE ShortLink SET Hits = Hits + 1 WHERE Shortened = ?`
-	result, err := repository.db.ExecContext(ctx, statement, slug)
+	result, err := store.db.ExecContext(ctx, statement, slug)
 	if err != nil {
 		return fmt.Errorf("increment hits: %w", err)
 	}
@@ -124,7 +116,7 @@ func (repository *MySQLRepository) IncrementHits(ctx context.Context, slug strin
 		return fmt.Errorf("read affected rows: %w", err)
 	}
 	if rows != 1 {
-		return ErrNotFound
+		return repository.ErrNotFound
 	}
 	return nil
 }

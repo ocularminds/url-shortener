@@ -1,4 +1,4 @@
-package shortner
+package web
 
 import (
 	"math"
@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/ocularminds/url-shortener/config"
 )
 
 type clientBucket struct {
@@ -25,12 +27,12 @@ type TokenBucketLimiter struct {
 	now        func() time.Time
 }
 
-func NewTokenBucketLimiter(config RateLimitConfig) *TokenBucketLimiter {
+func NewTokenBucketLimiter(settings config.RateLimit) *TokenBucketLimiter {
 	return &TokenBucketLimiter{
 		clients:    make(map[string]clientBucket),
-		rate:       float64(config.RequestsPerMinute) / 60,
-		burst:      float64(config.Burst),
-		maxClients: config.MaxClients,
+		rate:       float64(settings.RequestsPerMinute) / 60,
+		burst:      float64(settings.Burst),
+		maxClients: settings.MaxClients,
 		now:        time.Now,
 	}
 }

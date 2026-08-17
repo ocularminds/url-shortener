@@ -1,11 +1,10 @@
-package shortner
+package service
 
-import (
-	"crypto/rand"
-	"errors"
-)
+import "crypto/rand"
 
 const slugAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+
+const DefaultSlugLength = 8
 
 type SlugGenerator interface {
 	Generate() (string, error)
@@ -41,19 +40,4 @@ func (generator CryptoSlugGenerator) Generate() (string, error) {
 		}
 	}
 	return string(result), nil
-}
-
-func Shorten(target string) (string, error) {
-	if !IsValid(target) {
-		return "", ErrInvalidURL
-	}
-	return CryptoSlugGenerator{Length: DefaultSlugLength}.Generate()
-}
-
-func GetRandom() string {
-	value, err := CryptoSlugGenerator{Length: DefaultSlugLength}.Generate()
-	if err != nil {
-		panic(errors.New("operating system random source unavailable"))
-	}
-	return value
 }

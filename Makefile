@@ -4,13 +4,13 @@ setup:
 	go mod download
 
 server:
-	go run .
+	go run ./cmd/urlshortener
 
 test:
-	go test -race -cover ./...
+	go test -race -coverpkg=./... -cover ./...
 
 benchmark:
-	go test -run '^$$' -bench . -benchmem ./shortner
+	go test -run '^$$' -bench . -benchmem ./tests
 
 vet:
 	go vet ./...

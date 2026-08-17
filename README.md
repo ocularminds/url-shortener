@@ -1,27 +1,40 @@
 # URL Shortener
 
-A small Go and MySQL service that creates cryptographically random, eight-character short links and redirects them to validated HTTP or HTTPS destinations. The browser client is dependency-free.
+A small Go and MySQL service that creates cryptographically random, eight-character short links and redirects them to validated HTTP or HTTPS destinations. The browser client is dependency-free and embedded in the server binary.
 
-## Architecture
+## Project layout
 
-The backend is split by responsibility:
+```text
+cmd/urlshortener/          executable entrypoint and process signals
+config/                    configuration loading, defaults, and validation
+configs/                   non-secret runtime configuration files
+core/models/               dependency-free domain entities
+core/repository/           persistence contract
+core/repository/mysql/     MySQL adapter and database migrations
+core/service/              URL-shortening business rules
+web/                       HTTP handlers, middleware, lifecycle, embedded UI
+web/static/                dependency-free browser client
+tests/                     external black-box tests and benchmarks
+```
 
-- `Application` owns process lifecycle, HTTP server limits, and graceful shutdown.
-- `Handler` owns HTTP parsing, response formatting, security headers, and static files.
-- `URLShortener` owns link creation, reuse, expiry, collision retries, and resolution.
-- `LinkRepository` separates persistence from business logic; `MySQLRepository` reuses one bounded connection pool.
-- `URLValidator`, `CryptoSlugGenerator`, and `TokenBucketLimiter` each own one security policy.
+Dependencies point inward: `models` has no project dependencies, `repository` depends on models, `service` depends on the repository contract and models, and `web` composes those layers. Interfaces live with their consumers where practical. Constructors inject dependencies, and functional options provide deterministic clocks for tests without exposing internal state.
 
-Dependencies are passed through constructors, so tests use deterministic in-memory collaborators and do not need MySQL.
+## Responsibilities
+
+- `web.Application` owns server limits and graceful shutdown.
+- `web.Handler` owns HTTP parsing, response formatting, headers, and embedded assets.
+- `service.URLShortener` owns creation, reuse, expiry, collision retries, and resolution.
+- `repository.LinkRepository` isolates persistence; `mysql.Repository` reuses one bounded pool.
+- `service.URLValidator`, `service.CryptoSlugGenerator`, and `web.TokenBucketLimiter` each own one policy.
 
 ## Requirements
 
-- Go 1.26.6 or newer. This minimum includes standard-library security fixes detected during the review.
+- Go 1.26.6 or newer.
 - MySQL 8 or newer.
 
 ## Setup
 
-Create a database and least-privilege application user, then apply the schema:
+Create a database and least-privilege application user:
 
 ```sql
 CREATE DATABASE blogs CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
@@ -29,12 +42,14 @@ CREATE USER 'url_shortener'@'localhost' IDENTIFIED BY 'replace-with-a-secret';
 GRANT SELECT, INSERT, UPDATE ON blogs.* TO 'url_shortener'@'localhost';
 ```
 
+Apply the schema and download Go modules:
+
 ```sh
-mysql -u url_shortener -p blogs < shortner.sql
+mysql -u url_shortener -p blogs < core/repository/mysql/migrations/000_create_shortlink.sql
 make setup
 ```
 
-For an existing database created by the original schema, take a backup and apply `migrations/001_harden_shortlink.sql` once instead of recreating the table.
+For a database created by the original schema, take a backup and apply `core/repository/mysql/migrations/001_harden_shortlink.sql` once instead of recreating the table.
 
 Do not commit the database password. Supply it at runtime:
 
@@ -43,7 +58,7 @@ export URL_SHORTENER_DB_PASSWORD='replace-with-a-secret'
 make server
 ```
 
-The checked-in `config.json` contains non-secret local defaults. Supported environment overrides are:
+The checked-in `configs/config.json` contains non-secret local defaults. Supported environment overrides are:
 
 | Variable | Purpose |
 | --- | --- |
@@ -60,13 +75,10 @@ The checked-in `config.json` contains non-secret local defaults. Supported envir
 | `URL_SHORTENER_RATE_PER_MINUTE` | Per-peer create refill rate |
 | `URL_SHORTENER_RATE_BURST` | Per-peer create burst capacity |
 | `URL_SHORTENER_RATE_MAX_CLIENTS` | Maximum in-memory limiter entries |
-| `URL_SHORTENER_VIEWS_DIR` | Static client directory |
 
-Terminate HTTPS at a trusted reverse proxy and set `public_base_url` to the external HTTPS origin. The limiter deliberately ignores spoofable forwarded-IP headers, so it keys the immediate TCP peer; behind a reverse proxy, it limits that proxy as one peer unless trusted-proxy support is added explicitly.
+Terminate HTTPS at a trusted reverse proxy and set `public_base_url` to the external HTTPS origin. The limiter ignores spoofable forwarded-IP headers and keys the immediate TCP peer.
 
 ## API
-
-Create or retrieve a short link:
 
 ```sh
 curl --fail-with-body \
@@ -80,11 +92,11 @@ The first request returns `201 Created`; requesting the same active URL returns 
 ## Verification
 
 ```sh
-make test       # race detector and coverage
+make test       # external tests, race detector, and coverage
 make vet
 make build
 make vuln       # official Go vulnerability database
 make benchmark
 ```
 
-All owned source and configuration files are kept below 500 lines. The previous 16 MB vendored browser theme was removed, reducing transfer and dependency exposure.
+All source and configuration files remain below 500 lines.
