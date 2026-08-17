@@ -92,7 +92,7 @@ The first request returns `201 Created`; requesting the same active URL returns 
 ## Verification
 
 ```sh
-make test       # external tests, race detector, and coverage
+make test       # external tests, race detector, and enforced 98% coverage floor
 make vet
 make build
 make vuln       # official Go vulnerability database

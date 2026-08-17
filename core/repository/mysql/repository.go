@@ -18,6 +18,15 @@ type Repository struct {
 	db *sql.DB
 }
 
+// NewWithDB adapts an existing database pool. The caller retains responsibility
+// for configuring its limits; Repository.Close closes the supplied pool.
+func NewWithDB(db *sql.DB) (*Repository, error) {
+	if db == nil {
+		return nil, errors.New("database pool is required")
+	}
+	return &Repository{db: db}, nil
+}
+
 func New(ctx context.Context, cfg config.DatabaseConfig) (*Repository, error) {
 	driverConfig := mysqldriver.NewConfig()
 	driverConfig.User = cfg.Username
@@ -46,7 +55,7 @@ func New(ctx context.Context, cfg config.DatabaseConfig) (*Repository, error) {
 		db.Close()
 		return nil, fmt.Errorf("connect to database: %w", err)
 	}
-	return &Repository{db: db}, nil
+	return NewWithDB(db)
 }
 
 func (store *Repository) Close() error {

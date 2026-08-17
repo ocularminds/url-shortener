@@ -73,6 +73,7 @@ func TestHandlerRejectsMalformedRequests(t *testing.T) {
 		{name: "wrong content type", contentType: "text/plain", body: `{}`, status: http.StatusUnsupportedMediaType},
 		{name: "unknown field", contentType: "application/json", body: `{"url":"https://example.com","admin":true}`, status: http.StatusBadRequest},
 		{name: "multiple values", contentType: "application/json", body: `{"url":"https://example.com"}{}`, status: http.StatusBadRequest},
+		{name: "invalid trailing value", contentType: "application/json", body: `{"url":"https://example.com"}!`, status: http.StatusBadRequest},
 		{name: "unsafe scheme", contentType: "application/json", body: `{"url":"javascript://example.com"}`, status: http.StatusBadRequest},
 		{name: "oversized", contentType: "application/json", body: `{"url":"https://example.com/` + strings.Repeat("a", requestBodyLimit) + `"}`, status: http.StatusBadRequest},
 	}

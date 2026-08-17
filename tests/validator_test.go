@@ -62,3 +62,28 @@ func TestCryptoSlugGeneratorUsesExpectedFormat(t *testing.T) {
 		seen[slug] = struct{}{}
 	}
 }
+
+func TestURLValidatorUsesDefaultLimitAndRejectsInvalidUTF8(t *testing.T) {
+	t.Parallel()
+	validator := service.URLValidator{}
+	if err := validator.Validate("https://example.com"); err != nil {
+		t.Fatalf("zero-value validator rejected a valid URL: %v", err)
+	}
+	if err := validator.Validate(string([]byte("https://example.com/\xff"))); err == nil {
+		t.Fatal("validator accepted invalid UTF-8")
+	}
+	if !service.IsValid("https://example.com") || service.IsValid("mailto:user@example.com") {
+		t.Fatal("IsValid() returned an unexpected result")
+	}
+}
+
+func TestCryptoSlugGeneratorUsesDefaultLength(t *testing.T) {
+	t.Parallel()
+	slug, err := (service.CryptoSlugGenerator{}).Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(slug) != service.DefaultSlugLength {
+		t.Fatalf("generated slug length = %d", len(slug))
+	}
+}

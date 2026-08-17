@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"strconv"
 	"time"
@@ -41,9 +42,22 @@ func (application *Application) Address() string {
 }
 
 func (application *Application) Run(ctx context.Context) error {
+	listener, err := net.Listen("tcp", application.server.Addr)
+	if err != nil {
+		return fmt.Errorf("listen: %w", err)
+	}
+	return application.Serve(ctx, listener)
+}
+
+// Serve runs the application on an existing listener, which supports graceful
+// process handoff and deterministic lifecycle tests.
+func (application *Application) Serve(ctx context.Context, listener net.Listener) error {
+	if listener == nil {
+		return errors.New("listener is required")
+	}
 	errorChannel := make(chan error, 1)
 	go func() {
-		errorChannel <- application.server.ListenAndServe()
+		errorChannel <- application.server.Serve(listener)
 	}()
 
 	select {

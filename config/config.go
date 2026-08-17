@@ -106,7 +106,9 @@ func Load(path string) (Config, error) {
 	if err := applyEnvironment(&cfg); err != nil {
 		return Config{}, err
 	}
-	applyDefaults(&cfg)
+	if cfg.PublicBaseURL == "" {
+		cfg.PublicBaseURL = fmt.Sprintf("http://localhost:%d", cfg.Port)
+	}
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
 	}
@@ -122,70 +124,6 @@ func ensureJSONEnd(decoder *json.Decoder) error {
 		return err
 	}
 	return nil
-}
-
-func applyDefaults(cfg *Config) {
-	defaults := Default()
-	if cfg.Port == 0 {
-		cfg.Port = defaults.Port
-	}
-	if cfg.Database.Host == "" {
-		cfg.Database.Host = defaults.Database.Host
-	}
-	if cfg.Database.Port == 0 {
-		cfg.Database.Port = defaults.Database.Port
-	}
-	if cfg.Database.ConnectTimeout == 0 {
-		cfg.Database.ConnectTimeout = defaults.Database.ConnectTimeout
-	}
-	if cfg.Database.ReadTimeout == 0 {
-		cfg.Database.ReadTimeout = defaults.Database.ReadTimeout
-	}
-	if cfg.Database.WriteTimeout == 0 {
-		cfg.Database.WriteTimeout = defaults.Database.WriteTimeout
-	}
-	if cfg.Database.MaxOpenConnections == 0 {
-		cfg.Database.MaxOpenConnections = defaults.Database.MaxOpenConnections
-	}
-	if cfg.Database.MaxIdleConnections == 0 {
-		cfg.Database.MaxIdleConnections = defaults.Database.MaxIdleConnections
-	}
-	if cfg.Database.ConnectionLifetime == 0 {
-		cfg.Database.ConnectionLifetime = defaults.Database.ConnectionLifetime
-	}
-	if cfg.Database.ConnectionIdleTime == 0 {
-		cfg.Database.ConnectionIdleTime = defaults.Database.ConnectionIdleTime
-	}
-	if cfg.Server.ReadHeaderTimeout == 0 {
-		cfg.Server.ReadHeaderTimeout = defaults.Server.ReadHeaderTimeout
-	}
-	if cfg.Server.ReadTimeout == 0 {
-		cfg.Server.ReadTimeout = defaults.Server.ReadTimeout
-	}
-	if cfg.Server.WriteTimeout == 0 {
-		cfg.Server.WriteTimeout = defaults.Server.WriteTimeout
-	}
-	if cfg.Server.IdleTimeout == 0 {
-		cfg.Server.IdleTimeout = defaults.Server.IdleTimeout
-	}
-	if cfg.Server.ShutdownTimeout == 0 {
-		cfg.Server.ShutdownTimeout = defaults.Server.ShutdownTimeout
-	}
-	if cfg.Server.MaxHeaderBytes == 0 {
-		cfg.Server.MaxHeaderBytes = defaults.Server.MaxHeaderBytes
-	}
-	if cfg.RateLimit.RequestsPerMinute == 0 {
-		cfg.RateLimit.RequestsPerMinute = defaults.RateLimit.RequestsPerMinute
-	}
-	if cfg.RateLimit.Burst == 0 {
-		cfg.RateLimit.Burst = defaults.RateLimit.Burst
-	}
-	if cfg.RateLimit.MaxClients == 0 {
-		cfg.RateLimit.MaxClients = defaults.RateLimit.MaxClients
-	}
-	if cfg.PublicBaseURL == "" {
-		cfg.PublicBaseURL = fmt.Sprintf("http://localhost:%d", cfg.Port)
-	}
 }
 
 func applyEnvironment(cfg *Config) error {
