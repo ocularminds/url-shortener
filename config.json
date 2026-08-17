@@ -1,10 +1,21 @@
 {
   "port": 8080,
+  "public_base_url": "http://localhost:8080",
   "database": {
     "name": "blogs",
-    "host": "localhost",
+    "host": "127.0.0.1",
     "port": 3306,
-    "username": "root",
-    "password": "pass"
+    "username": "url_shortener",
+    "max_open_connections": 25,
+    "max_idle_connections": 10
+  },
+  "server": {
+    "max_header_bytes": 1048576,
+    "views_directory": "views"
+  },
+  "rate_limit": {
+    "requests_per_minute": 60,
+    "burst": 10,
+    "max_clients": 10000
   }
 }

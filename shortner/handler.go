@@ -2,135 +2,167 @@ package shortner
 
 import (
 	"encoding/json"
-	"fmt"
+	"errors"
+	"io"
+	"log"
+	"mime"
 	"net/http"
-	"time"
-
-	"github.com/gorilla/mux"
+	"net/url"
+	"path/filepath"
 )
 
-// Fault is interface for sending error message with code.
-type Fault struct {
-	Code      int
-	Message   string
-	Link      string
-	ShortLink string
+const maxRequestBodyBytes = 4 << 10
+
+type Handler struct {
+	service       LinkService
+	publicBaseURL *url.URL
+	viewsDir      string
+	logger        *log.Logger
 }
 
-// HandleHomeLink Rendering the Home Page
-func HandleHomeLink(response http.ResponseWriter, request *http.Request) {
-	http.ServeFile(response, request, "views/index.html")
+type createLinkRequest struct {
+	URL string `json:"url"`
 }
 
-// HandlePostLink This function will return the response based on link found in Database
-func HandlePostLink(w http.ResponseWriter, r *http.Request) {
-	var req ShortLink
-	var fault = Fault{
-		Code: http.StatusInternalServerError, Message: "Something went wrong at our end",
+type linkResponse struct {
+	Code      int    `json:"Code"`
+	Message   string `json:"Message"`
+	Link      string `json:"Link,omitempty"`
+	ShortLink string `json:"ShortLink,omitempty"`
+}
+
+func NewHandler(service LinkService, publicBaseURL string, viewsDir string, logger *log.Logger) (*Handler, error) {
+	if service == nil {
+		return nil, errors.New("link service is required")
 	}
-	decoder := json.NewDecoder(r.Body)
-	err := decoder.Decode(&req)
+	baseURL, err := url.Parse(publicBaseURL)
+	if err != nil || baseURL.Host == "" {
+		return nil, errors.New("valid public base URL is required")
+	}
+	if logger == nil {
+		logger = log.Default()
+	}
+	return &Handler{
+		service:       service,
+		publicBaseURL: baseURL,
+		viewsDir:      viewsDir,
+		logger:        logger,
+	}, nil
+}
 
+func (handler *Handler) Routes(limiter *TokenBucketLimiter) http.Handler {
+	router := http.NewServeMux()
+	router.HandleFunc("GET /", handler.home)
+	router.HandleFunc("POST /", handler.create)
+	router.HandleFunc("GET /app.js", handler.javascript)
+	router.HandleFunc("GET /style.css", handler.stylesheet)
+	router.Handle("GET /files/", http.StripPrefix("/files/", http.FileServer(http.Dir(handler.viewsDir))))
+	router.HandleFunc("GET /{slug}", handler.redirect)
+
+	var result http.Handler = router
+	if limiter != nil {
+		result = limitCreateRequests(result, limiter)
+	}
+	return securityHeaders(result)
+}
+
+func (handler *Handler) home(response http.ResponseWriter, request *http.Request) {
+	http.ServeFile(response, request, filepath.Join(handler.viewsDir, "index.html"))
+}
+
+func (handler *Handler) javascript(response http.ResponseWriter, request *http.Request) {
+	response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+	http.ServeFile(response, request, filepath.Join(handler.viewsDir, "app.js"))
+}
+
+func (handler *Handler) stylesheet(response http.ResponseWriter, request *http.Request) {
+	response.Header().Set("Content-Type", "text/css; charset=utf-8")
+	http.ServeFile(response, request, filepath.Join(handler.viewsDir, "style.css"))
+}
+
+func (handler *Handler) create(response http.ResponseWriter, request *http.Request) {
+	mediaType, _, err := mime.ParseMediaType(request.Header.Get("Content-Type"))
+	if err != nil || mediaType != "application/json" {
+		handler.writeError(response, http.StatusUnsupportedMediaType, "Content-Type must be application/json")
+		return
+	}
+
+	request.Body = http.MaxBytesReader(response, request.Body, maxRequestBodyBytes)
+	decoder := json.NewDecoder(request.Body)
+	decoder.DisallowUnknownFields()
+	var input createLinkRequest
+	if err := decoder.Decode(&input); err != nil {
+		handler.writeError(response, http.StatusBadRequest, "Request body must contain a valid URL")
+		return
+	}
+	if err := ensureJSONEnd(decoder); err != nil {
+		handler.writeError(response, http.StatusBadRequest, "Request body must contain one JSON object")
+		return
+	}
+
+	link, created, err := handler.service.Create(request.Context(), input.URL)
 	if err != nil {
-		fault.Code = http.StatusBadRequest
-		fault.Message = "URL can't be empty"
-		sendError(w, r, fault)
-	} else if !IsValid(req.Original) {
-		fault.Code = http.StatusBadRequest
-		fault.Message = "An invalid URL found, provide a valid URL"
-		sendError(w, r, fault)
-	} else {
-		createOrFetch(w, r, req)
-	}
-}
-
-// HandleGetLink This function will redirect to actual website
-func HandleGetLink(response http.ResponseWriter, request *http.Request) {
-	var httpError = Fault{
-		Code: http.StatusInternalServerError, Message: "Something went wrong at our end",
-	}
-	slug := mux.Vars(request)["slug"]
-	if slug == "" {
-		httpError.Code = http.StatusBadRequest
-		httpError.Message = "URL Code can't be empty"
-		sendError(response, request, httpError)
-	} else {
-		actual, err := Find(slug)
-		if actual.Original == "" || err != nil {
-			httpError.Code = http.StatusNotFound
-			httpError.Message = "An invalid/expired URL Code found"
-			sendError(response, request, httpError)
-		} else {
-			http.Redirect(response, request, actual.Original, http.StatusSeeOther)
+		if errors.Is(err, ErrInvalidURL) {
+			handler.writeError(response, http.StatusBadRequest, "Provide a valid HTTP or HTTPS URL")
+			return
 		}
+		handler.logger.Printf("create short link: %v", err)
+		handler.writeError(response, http.StatusInternalServerError, "Unable to create short link")
+		return
+	}
+
+	status := http.StatusOK
+	message := "Short URL already exists"
+	if created {
+		status = http.StatusCreated
+		message = "Short URL generated"
+	}
+	shortURL := handler.publicBaseURL.JoinPath(link.Shortened).String()
+	handler.writeJSON(response, status, linkResponse{
+		Code:      status,
+		Message:   message,
+		Link:      link.Shortened,
+		ShortLink: shortURL,
+	})
+}
+
+func (handler *Handler) redirect(response http.ResponseWriter, request *http.Request) {
+	link, err := handler.service.Resolve(request.Context(), request.PathValue("slug"))
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			handler.writeError(response, http.StatusNotFound, "Short URL was not found or has expired")
+			return
+		}
+		handler.logger.Printf("resolve short link: %v", err)
+		handler.writeError(response, http.StatusInternalServerError, "Unable to resolve short link")
+		return
+	}
+	http.Redirect(response, request, link.Original, http.StatusFound)
+}
+
+func (handler *Handler) writeError(response http.ResponseWriter, status int, message string) {
+	handler.writeJSON(response, status, linkResponse{Code: status, Message: message})
+}
+
+func (handler *Handler) writeJSON(response http.ResponseWriter, status int, value linkResponse) {
+	response.Header().Set("Content-Type", "application/json; charset=utf-8")
+	response.Header().Set("Cache-Control", "no-store")
+	response.WriteHeader(status)
+	if err := json.NewEncoder(response).Encode(value); err != nil && !errors.Is(err, io.ErrClosedPipe) {
+		handler.logger.Printf("write JSON response: %v", err)
 	}
 }
 
-func createOrFetch(w http.ResponseWriter, r *http.Request, req ShortLink) {
-	var id string
-	var err error
-	var isNew bool
-	q, e := FindByOriginalLink(req.Original)
-	if e != nil {
-		sendError(w, r, Fault{
-			Code: http.StatusInternalServerError, Message: "Something went wrong at our end",
-		})
-	}
-	if q.Expiry > 0 {
-		id = q.Shortened
-		err = nil
-		isNew = false
-	} else {
-		isNew = true
-		id, err = Shorten(req.Original)
-	}
-	if err != nil {
-		sendError(w, r, Fault{
-			Code: http.StatusInternalServerError, Message: "Something went wrong at our end",
-		})
-	} else {
-		s := ShortLink{Shortened: id, Original: req.Original, Created: time.Now(), Hits: 0}
-		sendLink(w, r, s, isNew)
-	}
-}
-
-func sendLink(w http.ResponseWriter, r *http.Request, s ShortLink, isNew bool) {
-	var fault Fault
-	var obj ShortLink
-	var err error
-	if isNew {
-		obj, err = Persist(s)
-	} else {
-		obj, err = s, nil
-	}
-	if err != nil {
-		fault = Fault{Message: "Unable to save short link"}
-		fmt.Println(err)
-		sendError(w, r, fault)
-	}
-
-	fault = Fault{
-		Code:      http.StatusOK,
-		Message:   "Short URL generated",
-		Link:      obj.Shortened,
-		ShortLink: r.Host + "/" + obj.Shortened,
-	}
-	data, err := json.Marshal(fault)
-	if err != nil {
-		panic(err)
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(fault.Code)
-	w.Write(data)
-}
-
-func sendError(w http.ResponseWriter, r *http.Request, m Fault) {
-	response := &Fault{Code: m.Code, Message: m.Message}
-	data, err := json.Marshal(response)
-	if err != nil {
-		panic(err)
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(m.Code)
-	w.Write(data)
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		response.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'")
+		response.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		response.Header().Set("Referrer-Policy", "no-referrer")
+		response.Header().Set("X-Content-Type-Options", "nosniff")
+		response.Header().Set("X-Frame-Options", "DENY")
+		if request.TLS != nil {
+			response.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		}
+		next.ServeHTTP(response, request)
+	})
 }

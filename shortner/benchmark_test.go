@@ -1,23 +1,16 @@
 package shortner
 
-import (
-	"strconv"
-	"testing"
-)
+import "testing"
 
-var result string
+var benchmarkSlug string
 
-func BenchmarkFibComplete(b *testing.B) {
-	var r string
-	for n := 0; n < b.N; n++ {
-		// always record the result of Fib to prevent
-		// the compiler eliminating the function call.
-		r, err := Shorten("http://stord.com/" + strconv.Itoa(n))
+func BenchmarkCryptoSlugGenerator(b *testing.B) {
+	generator := CryptoSlugGenerator{Length: DefaultSlugLength}
+	for index := 0; index < b.N; index++ {
+		slug, err := generator.Generate()
 		if err != nil {
-			result = r
+			b.Fatal(err)
 		}
+		benchmarkSlug = slug
 	}
-	// always store the result to a package level variable
-	// so the compiler cannot eliminate the Benchmark itself.
-	result = r
 }

@@ -1,90 +1,91 @@
 package shortner
 
 import (
+	"context"
 	"errors"
+	"fmt"
+	"regexp"
 	"time"
-
-	_ "github.com/go-sql-driver/mysql"
 )
 
-//Find retrives a ShortLink details for the provided link
-func Find(link string) (ShortLink, error) {
-	return findLink(link, false)
+const maxSlugAttempts = 5
+
+var validSlug = regexp.MustCompile(`^[A-Za-z0-9]{8}$`)
+
+type LinkService interface {
+	Create(context.Context, string) (ShortLink, bool, error)
+	Resolve(context.Context, string) (ShortLink, error)
 }
 
-//FindByOriginalLink retrives a ShortLink by original link
-func FindByOriginalLink(link string) (ShortLink, error) {
-	return findLink(link, true)
+type URLShortener struct {
+	repository LinkRepository
+	generator  SlugGenerator
+	validator  URLValidator
+	now        func() time.Time
+	expiryDays int
 }
 
-//Persist saves the link data in database
-func Persist(source ShortLink) (ShortLink, error) {
-	db, err := Connect()
+func NewURLShortener(repository LinkRepository, generator SlugGenerator) (*URLShortener, error) {
+	if repository == nil || generator == nil {
+		return nil, errors.New("repository and slug generator are required")
+	}
+	return &URLShortener{
+		repository: repository,
+		generator:  generator,
+		validator:  NewURLValidator(),
+		now:        time.Now,
+		expiryDays: DefaultExpiryDays,
+	}, nil
+}
+
+func (service *URLShortener) Create(ctx context.Context, original string) (ShortLink, bool, error) {
+	if err := service.validator.Validate(original); err != nil {
+		return ShortLink{}, false, err
+	}
+
+	existing, err := service.repository.FindByOriginal(ctx, original)
+	if err == nil && !existing.Expired(service.now()) {
+		return existing, false, nil
+	}
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return ShortLink{}, false, fmt.Errorf("find original URL: %w", err)
+	}
+
+	for attempt := 0; attempt < maxSlugAttempts; attempt++ {
+		slug, err := service.generator.Generate()
+		if err != nil {
+			return ShortLink{}, false, fmt.Errorf("generate secure slug: %w", err)
+		}
+		link := ShortLink{
+			Shortened: slug,
+			Original:  original,
+			Expiry:    service.expiryDays,
+			Created:   service.now().UTC(),
+		}
+		if err := service.repository.Create(ctx, link); errors.Is(err, ErrConflict) {
+			continue
+		} else if err != nil {
+			return ShortLink{}, false, err
+		}
+		return link, true, nil
+	}
+	return ShortLink{}, false, errors.New("could not allocate a unique slug")
+}
+
+func (service *URLShortener) Resolve(ctx context.Context, slug string) (ShortLink, error) {
+	if !validSlug.MatchString(slug) {
+		return ShortLink{}, ErrNotFound
+	}
+	link, err := service.repository.FindBySlug(ctx, slug)
 	if err != nil {
 		return ShortLink{}, err
 	}
-	defer db.Close()
-	statement, err := db.Prepare("insert into ShortLink(Shortened, original, expiry, created, hits) values(?,?,?,?,?)")
-
-	if err != nil {
+	if link.Expired(service.now()) {
+		return ShortLink{}, ErrNotFound
+	}
+	if err := service.repository.IncrementHits(ctx, slug); err != nil {
 		return ShortLink{}, err
 	}
-	source.Created = time.Now()
-	source.Expiry = 30
-	source.Hits = 0
-	statement.Exec(source.Shortened, source.Original, source.Expiry, source.Created, source.Hits)
-	return source, nil
-}
-
-//UpdateCount updates hit count in database
-func UpdateCount(link string) error {
-	db, err := Connect()
-	if err != nil {
-		return err
-	}
-	defer db.Close()
-	statement, err := db.Prepare("update ShortLink set hits = hits + 1 where Shortened =?")
-	if err != nil {
-		return errors.New("Unable to update hits in database")
-	}
-	statement.Exec(link)
-	return nil
-}
-
-func createQuery(oldlink bool) string {
-	if oldlink {
-		return "select Shortened,Original,Expiry, Created,Hits from ShortLink where Original = ?"
-	}
-	return "select Shortened,Original,Expiry, Created,Hits from ShortLink where Shortened = ?"
-}
-
-func findLink(link string, oldlink bool) (ShortLink, error) {
-	if link == "" {
-		return ShortLink{}, errors.New("Invalid link")
-	}
-	db, err := Connect()
-	if err != nil {
-		return ShortLink{}, err
-	}
-	defer db.Close()
-	result, err := db.Query(createQuery(oldlink), link)
-
-	if err != nil {
-		return ShortLink{}, err
-	}
-	object := ShortLink{}
-	var shorten string
-	var original string
-	var expiry int
-	var created time.Time
-	var vhits int
-	for result.Next() {
-		result.Scan(&shorten, &original, &expiry, &created, &vhits)
-		object.Shortened = shorten
-		object.Original = original
-		object.Expiry = expiry
-		object.Created = created
-		object.Hits = vhits
-	}
-	return object, nil
+	link.Hits++
+	return link, nil
 }
