@@ -1,13 +1,16 @@
-package shortner
+package tests
 
 import (
+	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/ocularminds/url-shortener/core/service"
 )
 
 func TestURLValidatorAcceptsHTTPURLs(t *testing.T) {
 	t.Parallel()
-	validator := NewURLValidator()
+	validator := service.NewURLValidator()
 	for _, candidate := range []string{
 		"https://www.example.com/search?q=url+shortener#results",
 		"http://localhost:8080/path",
@@ -21,7 +24,7 @@ func TestURLValidatorAcceptsHTTPURLs(t *testing.T) {
 
 func TestURLValidatorRejectsUnsafeOrMalformedURLs(t *testing.T) {
 	t.Parallel()
-	validator := NewURLValidator()
+	validator := service.NewURLValidator()
 	for _, candidate := range []string{
 		"",
 		"example.com/path",
@@ -32,7 +35,7 @@ func TestURLValidatorRejectsUnsafeOrMalformedURLs(t *testing.T) {
 		"https://example.com\r\nX-Injected: true",
 		"https://",
 		"https://example.com:" + strings.Repeat("9", 8),
-		"https://example.com/" + strings.Repeat("a", MaxURLLength),
+		"https://example.com/" + strings.Repeat("a", service.MaxURLLength),
 	} {
 		if err := validator.Validate(candidate); err == nil {
 			t.Errorf("Validate(%q) unexpectedly succeeded", candidate)
@@ -40,25 +43,18 @@ func TestURLValidatorRejectsUnsafeOrMalformedURLs(t *testing.T) {
 	}
 }
 
-func TestShortenUsesExpectedSlugFormat(t *testing.T) {
+func TestCryptoSlugGeneratorUsesExpectedFormat(t *testing.T) {
 	t.Parallel()
-	slug, err := Shorten("https://example.com/a/long/path")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !validSlug.MatchString(slug) {
-		t.Fatalf("generated slug %q does not match the public format", slug)
-	}
-}
-
-func TestCryptoSlugGeneratorProducesDistinctValues(t *testing.T) {
-	t.Parallel()
-	generator := CryptoSlugGenerator{Length: DefaultSlugLength}
+	generator := service.CryptoSlugGenerator{Length: service.DefaultSlugLength}
+	format := regexp.MustCompile(`^[A-Za-z0-9]{8}$`)
 	seen := make(map[string]struct{}, 1_000)
 	for index := 0; index < 1_000; index++ {
 		slug, err := generator.Generate()
 		if err != nil {
 			t.Fatal(err)
+		}
+		if !format.MatchString(slug) {
+			t.Fatalf("generated slug %q does not match public format", slug)
 		}
 		if _, exists := seen[slug]; exists {
 			t.Fatalf("unexpected duplicate slug %q", slug)

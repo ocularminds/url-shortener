@@ -1,11 +1,15 @@
-package shortner
+package tests
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/ocularminds/url-shortener/core/service"
+)
 
 var benchmarkSlug string
 
 func BenchmarkCryptoSlugGenerator(b *testing.B) {
-	generator := CryptoSlugGenerator{Length: DefaultSlugLength}
+	generator := service.CryptoSlugGenerator{Length: service.DefaultSlugLength}
 	for index := 0; index < b.N; index++ {
 		slug, err := generator.Generate()
 		if err != nil {

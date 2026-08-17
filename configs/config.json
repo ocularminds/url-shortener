@@ -10,8 +10,7 @@
     "max_idle_connections": 10
   },
   "server": {
-    "max_header_bytes": 1048576,
-    "views_directory": "views"
+    "max_header_bytes": 1048576
   },
   "rate_limit": {
     "requests_per_minute": 60,

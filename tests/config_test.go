@@ -1,9 +1,11 @@
-package shortner
+package tests
 
 import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	appconfig "github.com/ocularminds/url-shortener/config"
 )
 
 func TestLoadConfigAppliesEnvironmentSecrets(t *testing.T) {
@@ -21,7 +23,7 @@ func TestLoadConfigAppliesEnvironmentSecrets(t *testing.T) {
 	}
 	t.Setenv("URL_SHORTENER_DB_PASSWORD", "environment-secret")
 
-	cfg, err := LoadConfig(path)
+	cfg, err := appconfig.Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +36,7 @@ func TestLoadConfigAppliesEnvironmentSecrets(t *testing.T) {
 }
 
 func TestConfigRejectsHostilePublicURL(t *testing.T) {
-	cfg := DefaultConfig()
+	cfg := appconfig.Default()
 	cfg.Database.Name = "shortener"
 	cfg.Database.Username = "app"
 	for _, candidate := range []string{
@@ -52,7 +54,7 @@ func TestConfigRejectsHostilePublicURL(t *testing.T) {
 }
 
 func TestConfigRequiresTLSForRemoteDatabase(t *testing.T) {
-	cfg := DefaultConfig()
+	cfg := appconfig.Default()
 	cfg.PublicBaseURL = "https://sho.rt"
 	cfg.Database.Name = "shortener"
 	cfg.Database.Username = "app"

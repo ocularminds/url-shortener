@@ -1,4 +1,5 @@
-package shortner
+// Package config loads and validates runtime configuration.
+package config
 
 import (
 	"encoding/json"
@@ -15,7 +16,46 @@ import (
 
 const maxConfigBytes = 64 << 10
 
-func DefaultConfig() Config {
+type Config struct {
+	Port          int            `json:"port"`
+	PublicBaseURL string         `json:"public_base_url"`
+	Database      DatabaseConfig `json:"database"`
+	Server        ServerConfig   `json:"server"`
+	RateLimit     RateLimit      `json:"rate_limit"`
+}
+
+type DatabaseConfig struct {
+	Name               string        `json:"name"`
+	Username           string        `json:"username"`
+	Password           string        `json:"-"`
+	Host               string        `json:"host"`
+	Port               int           `json:"port"`
+	TLSMode            string        `json:"tls_mode"`
+	ConnectTimeout     time.Duration `json:"-"`
+	ReadTimeout        time.Duration `json:"-"`
+	WriteTimeout       time.Duration `json:"-"`
+	MaxOpenConnections int           `json:"max_open_connections"`
+	MaxIdleConnections int           `json:"max_idle_connections"`
+	ConnectionLifetime time.Duration `json:"-"`
+	ConnectionIdleTime time.Duration `json:"-"`
+}
+
+type ServerConfig struct {
+	ReadHeaderTimeout time.Duration `json:"-"`
+	ReadTimeout       time.Duration `json:"-"`
+	WriteTimeout      time.Duration `json:"-"`
+	IdleTimeout       time.Duration `json:"-"`
+	ShutdownTimeout   time.Duration `json:"-"`
+	MaxHeaderBytes    int           `json:"max_header_bytes"`
+}
+
+type RateLimit struct {
+	RequestsPerMinute int `json:"requests_per_minute"`
+	Burst             int `json:"burst"`
+	MaxClients        int `json:"max_clients"`
+}
+
+func Default() Config {
 	return Config{
 		Port: 8080,
 		Database: DatabaseConfig{
@@ -36,9 +76,8 @@ func DefaultConfig() Config {
 			IdleTimeout:       60 * time.Second,
 			ShutdownTimeout:   10 * time.Second,
 			MaxHeaderBytes:    1 << 20,
-			ViewsDirectory:    "views",
 		},
-		RateLimit: RateLimitConfig{
+		RateLimit: RateLimit{
 			RequestsPerMinute: 60,
 			Burst:             10,
 			MaxClients:        10_000,
@@ -46,11 +85,10 @@ func DefaultConfig() Config {
 	}
 }
 
-// LoadConfig loads non-secret settings from a JSON file and then applies
-// URL_SHORTENER_* environment overrides. The password is intentionally
-// environment-only.
-func LoadConfig(path string) (Config, error) {
-	cfg := DefaultConfig()
+// Load reads non-secret JSON settings and applies URL_SHORTENER_* environment
+// overrides. The database password is intentionally environment-only.
+func Load(path string) (Config, error) {
+	cfg := Default()
 	file, err := os.Open(path)
 	if err != nil {
 		return Config{}, fmt.Errorf("open config: %w", err)
@@ -65,7 +103,6 @@ func LoadConfig(path string) (Config, error) {
 	if err := ensureJSONEnd(decoder); err != nil {
 		return Config{}, fmt.Errorf("decode config: %w", err)
 	}
-
 	if err := applyEnvironment(&cfg); err != nil {
 		return Config{}, err
 	}
@@ -88,7 +125,7 @@ func ensureJSONEnd(decoder *json.Decoder) error {
 }
 
 func applyDefaults(cfg *Config) {
-	defaults := DefaultConfig()
+	defaults := Default()
 	if cfg.Port == 0 {
 		cfg.Port = defaults.Port
 	}
@@ -137,9 +174,6 @@ func applyDefaults(cfg *Config) {
 	if cfg.Server.MaxHeaderBytes == 0 {
 		cfg.Server.MaxHeaderBytes = defaults.Server.MaxHeaderBytes
 	}
-	if cfg.Server.ViewsDirectory == "" {
-		cfg.Server.ViewsDirectory = defaults.Server.ViewsDirectory
-	}
 	if cfg.RateLimit.RequestsPerMinute == 0 {
 		cfg.RateLimit.RequestsPerMinute = defaults.RateLimit.RequestsPerMinute
 	}
@@ -162,7 +196,6 @@ func applyEnvironment(cfg *Config) error {
 		"URL_SHORTENER_DB_PASSWORD":     &cfg.Database.Password,
 		"URL_SHORTENER_DB_HOST":         &cfg.Database.Host,
 		"URL_SHORTENER_DB_TLS_MODE":     &cfg.Database.TLSMode,
-		"URL_SHORTENER_VIEWS_DIR":       &cfg.Server.ViewsDirectory,
 	}
 	for name, destination := range stringOverrides {
 		if value, ok := os.LookupEnv(name); ok {
@@ -234,13 +267,10 @@ func (cfg Config) Validate() error {
 	if cfg.Server.ReadHeaderTimeout <= 0 || cfg.Server.ReadTimeout <= 0 || cfg.Server.WriteTimeout <= 0 || cfg.Server.IdleTimeout <= 0 || cfg.Server.ShutdownTimeout <= 0 {
 		return errors.New("server timeouts must be positive")
 	}
-	if strings.ContainsAny(cfg.Server.ViewsDirectory, "\x00") {
-		return errors.New("views directory is invalid")
-	}
 	return nil
 }
 
-func (cfg DatabaseConfig) address() string {
+func (cfg DatabaseConfig) Address() string {
 	return net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
 }
 

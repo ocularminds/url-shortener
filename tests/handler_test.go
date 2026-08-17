@@ -1,4 +1,4 @@
-package shortner
+package tests
 
 import (
 	"bytes"
@@ -9,17 +9,29 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/ocularminds/url-shortener/config"
+	"github.com/ocularminds/url-shortener/web"
 )
+
+const requestBodyLimit = 4 << 10
+
+type testLinkResponse struct {
+	Code      int    `json:"Code"`
+	Message   string `json:"Message"`
+	Link      string `json:"Link"`
+	ShortLink string `json:"ShortLink"`
+}
 
 func newTestHandler(t *testing.T) (http.Handler, *memoryRepository) {
 	t.Helper()
-	repository := newMemoryRepository()
-	service := newTestService(t, repository, "AbCd1234", "EfGh5678")
-	handler, err := NewHandler(service, "https://sho.rt", "../views", log.New(io.Discard, "", 0))
+	store := newMemoryRepository()
+	shortener := newTestService(t, store, "AbCd1234", "EfGh5678")
+	handler, err := web.NewHandler(shortener, "https://sho.rt", log.New(io.Discard, "", 0))
 	if err != nil {
 		t.Fatal(err)
 	}
-	return handler.Routes(nil), repository
+	return handler.Routes(nil), store
 }
 
 func performJSONRequest(handler http.Handler, body string) *httptest.ResponseRecorder {
@@ -36,7 +48,7 @@ func TestHandlerCreatesLinkWithoutTrustingHostHeader(t *testing.T) {
 	if response.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want %d; body=%s", response.Code, http.StatusCreated, response.Body.String())
 	}
-	var payload linkResponse
+	var payload testLinkResponse
 	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +74,7 @@ func TestHandlerRejectsMalformedRequests(t *testing.T) {
 		{name: "unknown field", contentType: "application/json", body: `{"url":"https://example.com","admin":true}`, status: http.StatusBadRequest},
 		{name: "multiple values", contentType: "application/json", body: `{"url":"https://example.com"}{}`, status: http.StatusBadRequest},
 		{name: "unsafe scheme", contentType: "application/json", body: `{"url":"javascript://example.com"}`, status: http.StatusBadRequest},
-		{name: "oversized", contentType: "application/json", body: `{"url":"https://example.com/` + strings.Repeat("a", maxRequestBodyBytes) + `"}`, status: http.StatusBadRequest},
+		{name: "oversized", contentType: "application/json", body: `{"url":"https://example.com/` + strings.Repeat("a", requestBodyLimit) + `"}`, status: http.StatusBadRequest},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -124,9 +136,9 @@ func TestHandlerAddsSecurityHeaders(t *testing.T) {
 	}
 }
 
-func TestHandlerServesOnlyExplicitStaticAssets(t *testing.T) {
+func TestHandlerServesOnlyEmbeddedAssets(t *testing.T) {
 	handler, _ := newTestHandler(t)
-	for _, path := range []string{"/app.js", "/style.css"} {
+	for _, path := range []string{"/", "/app.js", "/style.css"} {
 		request := httptest.NewRequest(http.MethodGet, path, nil)
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, request)
@@ -144,13 +156,13 @@ func TestHandlerServesOnlyExplicitStaticAssets(t *testing.T) {
 }
 
 func TestCreateRouteIsRateLimited(t *testing.T) {
-	repository := newMemoryRepository()
-	service := newTestService(t, repository, "AbCd1234", "EfGh5678")
-	handler, err := NewHandler(service, "https://sho.rt", "../views", log.New(io.Discard, "", 0))
+	store := newMemoryRepository()
+	shortener := newTestService(t, store, "AbCd1234", "EfGh5678")
+	handler, err := web.NewHandler(shortener, "https://sho.rt", log.New(io.Discard, "", 0))
 	if err != nil {
 		t.Fatal(err)
 	}
-	limiter := NewTokenBucketLimiter(RateLimitConfig{RequestsPerMinute: 1, Burst: 1, MaxClients: 10})
+	limiter := web.NewTokenBucketLimiter(config.RateLimit{RequestsPerMinute: 1, Burst: 1, MaxClients: 10})
 	router := handler.Routes(limiter)
 
 	first := performJSONRequest(router, `{"url":"https://example.com/one"}`)

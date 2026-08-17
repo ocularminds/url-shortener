@@ -1,6 +1,7 @@
-package shortner
+package web
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -8,7 +9,9 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
-	"path/filepath"
+
+	"github.com/ocularminds/url-shortener/core/models"
+	"github.com/ocularminds/url-shortener/core/service"
 )
 
 const maxRequestBodyBytes = 4 << 10
@@ -16,8 +19,12 @@ const maxRequestBodyBytes = 4 << 10
 type Handler struct {
 	service       LinkService
 	publicBaseURL *url.URL
-	viewsDir      string
 	logger        *log.Logger
+}
+
+type LinkService interface {
+	Create(context.Context, string) (models.ShortLink, bool, error)
+	Resolve(context.Context, string) (models.ShortLink, error)
 }
 
 type createLinkRequest struct {
@@ -31,8 +38,8 @@ type linkResponse struct {
 	ShortLink string `json:"ShortLink,omitempty"`
 }
 
-func NewHandler(service LinkService, publicBaseURL string, viewsDir string, logger *log.Logger) (*Handler, error) {
-	if service == nil {
+func NewHandler(linkService LinkService, publicBaseURL string, logger *log.Logger) (*Handler, error) {
+	if linkService == nil {
 		return nil, errors.New("link service is required")
 	}
 	baseURL, err := url.Parse(publicBaseURL)
@@ -43,9 +50,8 @@ func NewHandler(service LinkService, publicBaseURL string, viewsDir string, logg
 		logger = log.Default()
 	}
 	return &Handler{
-		service:       service,
+		service:       linkService,
 		publicBaseURL: baseURL,
-		viewsDir:      viewsDir,
 		logger:        logger,
 	}, nil
 }
@@ -66,20 +72,15 @@ func (handler *Handler) Routes(limiter *TokenBucketLimiter) http.Handler {
 }
 
 func (handler *Handler) home(response http.ResponseWriter, request *http.Request) {
-	response.Header().Set("Cache-Control", "no-cache")
-	http.ServeFile(response, request, filepath.Join(handler.viewsDir, "index.html"))
+	serveAsset(response, request, "text/html; charset=utf-8", "no-cache")
 }
 
 func (handler *Handler) javascript(response http.ResponseWriter, request *http.Request) {
-	response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-	response.Header().Set("Cache-Control", "public, max-age=3600")
-	http.ServeFile(response, request, filepath.Join(handler.viewsDir, "app.js"))
+	serveAsset(response, request, "text/javascript; charset=utf-8", "public, max-age=3600")
 }
 
 func (handler *Handler) stylesheet(response http.ResponseWriter, request *http.Request) {
-	response.Header().Set("Content-Type", "text/css; charset=utf-8")
-	response.Header().Set("Cache-Control", "public, max-age=3600")
-	http.ServeFile(response, request, filepath.Join(handler.viewsDir, "style.css"))
+	serveAsset(response, request, "text/css; charset=utf-8", "public, max-age=3600")
 }
 
 func (handler *Handler) create(response http.ResponseWriter, request *http.Request) {
@@ -104,7 +105,7 @@ func (handler *Handler) create(response http.ResponseWriter, request *http.Reque
 
 	link, created, err := handler.service.Create(request.Context(), input.URL)
 	if err != nil {
-		if errors.Is(err, ErrInvalidURL) {
+		if errors.Is(err, service.ErrInvalidURL) {
 			handler.writeError(response, http.StatusBadRequest, "Provide a valid HTTP or HTTPS URL")
 			return
 		}
@@ -131,7 +132,7 @@ func (handler *Handler) create(response http.ResponseWriter, request *http.Reque
 func (handler *Handler) redirect(response http.ResponseWriter, request *http.Request) {
 	link, err := handler.service.Resolve(request.Context(), request.PathValue("slug"))
 	if err != nil {
-		if errors.Is(err, ErrNotFound) {
+		if errors.Is(err, service.ErrNotFound) {
 			handler.writeError(response, http.StatusNotFound, "Short URL was not found or has expired")
 			return
 		}
@@ -140,6 +141,17 @@ func (handler *Handler) redirect(response http.ResponseWriter, request *http.Req
 		return
 	}
 	http.Redirect(response, request, link.Original, http.StatusFound)
+}
+
+func ensureJSONEnd(decoder *json.Decoder) error {
+	var extra any
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("multiple JSON values are not allowed")
+		}
+		return err
+	}
+	return nil
 }
 
 func (handler *Handler) writeError(response http.ResponseWriter, status int, message string) {

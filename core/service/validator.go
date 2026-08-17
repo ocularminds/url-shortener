@@ -1,4 +1,5 @@
-package shortner
+// Package service contains URL-shortening business rules.
+package service
 
 import (
 	"errors"
@@ -10,6 +11,8 @@ import (
 )
 
 var ErrInvalidURL = errors.New("invalid URL")
+
+const MaxURLLength = 2048
 
 type URLValidator struct {
 	MaxLength int
